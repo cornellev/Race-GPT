@@ -47,3 +47,11 @@ RECENT_TELEMETRY_CSV:
 
 ANSWER:
 """
+
+
+
+
+
+
+
+Do not flag isolated points, only flag when deviations are consistently observed across multiple consecutive windows or samples exceeding expected stability thresholds (e.g., 3 standard deviations from mean).

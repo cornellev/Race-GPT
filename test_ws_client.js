@@ -1,6 +1,11 @@
-import requests
+// Simple WebSocket test client for ws://localhost:8000/ws/analyze
+// Setup: npm init -y && npm i ws
+// Run: node test_ws_client.js
 
-good_csv = """
+const WebSocket = require("ws");
+const ws = new WebSocket("ws://localhost:8000/ws/analyze");
+
+const goodCsv = `
 ros_time_sec,frame_id,bus_voltage,shunt_voltage,current,power
 0.0,,40.95874786376953,0.017878426238894463,0.0,0.0
 0.0,,40.95874786376953,0.017878426238894463,0.0,0.0
@@ -35,42 +40,17 @@ ros_time_sec,frame_id,bus_voltage,shunt_voltage,current,power
 0.0,,40.95874786376953,0.020858164876699448,0.0,0.0
 0.0,,40.95874786376953,0.017878426238894463,0.0,0.0
 0.0,,40.95874786376953,0.017878426238894463,0.0,0.0
-"""
+`.trim();
 
-bad_csv = """
-ros_time_sec,frame_id,bus_voltage,shunt_voltage,current,power
-1.0,,39.2,0.018,0.2,7.84
-2.0,,39.0,0.018,0.25,9.75
-3.0,,38.7,0.019,0.3,11.61
-4.0,,38.5,0.021,0.35,13.48
-5.0,,38.2,0.022,0.4,15.28
-6.0,,38.0,0.024,0.45,17.10
-7.0,,37.8,0.026,0.5,18.90
-8.0,,37.6,0.030,0.55,20.68
-"""
+ws.addEventListener("open", () => {
+  ws.send(JSON.stringify({ csv: goodCsv }));
+});
 
-# Example with an inverse relationship: current up, bus voltage down.
-# The current precheck does not evaluate correlation yet so this will fail
-correlation_example_csv = """
-ros_time_sec,frame_id,bus_voltage,shunt_voltage,current,power
-1.0,,41.0,0.022,0.10,4.10
-2.0,,40.5,0.023,0.15,6.08
-3.0,,40.0,0.024,0.20,8.00
-4.0,,39.5,0.025,0.25,9.88
-5.0,,39.0,0.026,0.30,11.70
-6.0,,38.5,0.027,0.35,13.48
-7.0,,38.0,0.028,0.40,15.20
-8.0,,37.5,0.029,0.45,16.88
-"""
+ws.addEventListener("message", (event) => {
+  console.log("response:", event.data);
+  ws.close();
+});
 
-for label, csv_data in [
-    ("good", good_csv),
-    ("bad", bad_csv),
-    ("correlation_example", correlation_example_csv),
-]:
-    resp = requests.post(
-        "http://localhost:8000/analyze",
-        json={"csv": csv_data},
-        timeout=50,
-    )
-    print(label, resp.json())
+ws.addEventListener("error", (err) => {
+  console.error("ws error:", err);
+});
