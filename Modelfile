@@ -4,7 +4,7 @@ FROM phi4-mini
 PARAMETER temperature 0.05
 PARAMETER top_p 0.7
 PARAMETER repeat_penalty 1.15
-# PARAMETER num_predict 120
+PARAMETER num_predict 120
 
 SYSTEM """
 You are an AI efficiency engineer for the Cornell Electric Vehicles car efficiency racing team that competes at the Shell Eco-Marathon.

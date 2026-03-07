@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -12,6 +14,11 @@ from telemetry import (
 )
 
 app = FastAPI()
+
+try:
+    import serial
+except ImportError:  # pragma: no cover - optional dependency
+    serial = None
 
 
 class TelemetryIn(BaseModel):
@@ -107,19 +114,18 @@ def parse_incoming_payload(csv_payload: Optional[str], json_payload: Optional[An
     raise ValueError("Missing telemetry payload: provide `csv` or `json`.")
 
 
-@app.post("/analyze")
-def analyze(data: TelemetryIn):
+def build_verdict(csv_payload: Optional[str], json_payload: Optional[Any]) -> str:
     try:
-        current_df = parse_incoming_payload(data.csv, data.json_payload)
+        current_df = parse_incoming_payload(csv_payload, json_payload)
     except Exception:
-        return {"verdict": "Telemetry invalid: unable to parse payload."}
+        return "Telemetry invalid: unable to parse payload."
 
     baseline = load_baseline()
     current_summary = build_summary(current_df)
     decision = precheck(baseline, current_summary, current_df)
 
     if decision is None:
-        return {"verdict": "No critical issues detected."}
+        return "No critical issues detected."
 
     prompt = f"""
     PRECHECK_DECISION:
@@ -134,108 +140,109 @@ def analyze(data: TelemetryIn):
     Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
     """.strip()
 
-    response = chat(
-        model="cev-efficiency-engineer",
-        messages=[
-            {"role": "user", "content": prompt},
-        ],
-        stream=False,
-        keep_alive=600,
-        options={
-            "temperature": 0.05,
-            "top_p": 0.7,
-            "repeat_penalty": 1.15,
-            "num_predict": 32,
-            "stop": ["\n"],
-        },
-    )
+    try:
+        response = chat(
+            model="cev-efficiency-engineer",
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+            keep_alive=600,
+            options={
+                "temperature": 0.05,
+                "top_p": 0.7,
+                "repeat_penalty": 1.15,
+                "num_predict": 32,
+                "stop": ["\n"],
+            },
+        )
+    except Exception:
+        return "Model unavailable: unable to analyze."
 
     text = response["message"]["content"].strip()
-
-    # Absolute safety clamp (should almost never trigger)
     if "." in text:
-        text = text.split(".")[0].strip() + "."
-    else:
-        text = text.strip() + "."
+        return text.split(".")[0].strip() + "."
+    return text.strip() + "."
 
-    return {"verdict": text}
+
+def analyze_message(payload: dict) -> dict:
+    return {"verdict": build_verdict(payload.get("csv"), payload.get("json"))}
+
+
+@app.post("/analyze")
+def analyze(data: TelemetryIn):
+    return {"verdict": build_verdict(data.csv, data.json_payload)}
 
 
 @app.websocket("/ws/analyze")
 async def analyze_ws(websocket: WebSocket):
     await websocket.accept()
+    serial_port = os.getenv("SERIAL_PORT")
+    serial_baud = int(os.getenv("SERIAL_BAUD", "9600"))
+    serial_timeout = float(os.getenv("SERIAL_TIMEOUT", "1"))
+
+    # Backward-compatible fallback to websocket-input mode if serial is not configured.
+    if not serial_port:
+        try:
+            while True:
+                payload = await websocket.receive_json()
+                result = await asyncio.to_thread(analyze_message, payload)
+                await websocket.send_json(result)
+        except WebSocketDisconnect:
+            return
+
+    if serial is None:
+        await websocket.send_json({"verdict": "Serial unavailable: install pyserial."})
+        return
+
+    try:
+        ser = serial.Serial(serial_port, serial_baud, timeout=serial_timeout)
+    except Exception:
+        await websocket.send_json({"verdict": "Serial unavailable: cannot open port."})
+        return
+
     try:
         while True:
-            payload = await websocket.receive_json()
             try:
-                current_df = parse_incoming_payload(
-                    payload.get("csv"),
-                    payload.get("json"),
-                )
+                raw_line = await asyncio.to_thread(ser.readline)
             except Exception:
                 await websocket.send_json(
-                    {"verdict": "Telemetry invalid: unable to parse payload."}
+                    {"verdict": "Serial read error: unable to receive telemetry."}
                 )
                 continue
 
-            baseline = load_baseline()
-            current_summary = build_summary(current_df)
-            decision = precheck(baseline, current_summary, current_df)
-
-            if decision is None:
-                await websocket.send_json(
-                    {"verdict": "No critical issues detected."}
-                )
+            if not raw_line:
+                await asyncio.sleep(0.05)
                 continue
 
-            prompt = f"""
-            PRECHECK_DECISION:
-            {decision}
-
-            BASELINE_TELEMETRY:
-            {json.dumps(baseline, separators=(",", ":"), ensure_ascii=False)}
-
-            CURRENT_SUMMARY:
-            {json.dumps(current_summary, separators=(",", ":"), ensure_ascii=False)}
-
-            Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
-            """.strip()
-
-            print(prompt, flush=True)
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
 
             try:
-                response = chat(
-                    model="cev-efficiency-engineer",
-                    messages=[
-                        {"role": "user", "content": prompt},
-                    ],
-                    stream=False,
-                    keep_alive=600,
-                    options={
-                        "temperature": 0.05,
-                        "top_p": 0.7,
-                        "repeat_penalty": 1.15,
-                        "num_predict": 32,
-                        "stop": ["\n"],
-                    },
-                )
+                payload = json.loads(line)
             except Exception:
-                await websocket.send_json(
-                    {"verdict": "Model unavailable: unable to analyze."}
+                result = {"verdict": "Telemetry invalid: serial payload is not JSON."}
+                await websocket.send_json(result)
+                await asyncio.to_thread(
+                    ser.write, (json.dumps(result) + "\n").encode("utf-8")
                 )
                 continue
 
-            text = response["message"]["content"].strip()
-            if "." in text:
-                text = text.split(".")[0].strip() + "."
-            else:
-                text = text.strip() + "."
-
-            await websocket.send_json({"verdict": text})
+            result = await asyncio.to_thread(analyze_message, payload)
+            await websocket.send_json(result)
+            await asyncio.to_thread(ser.write, (json.dumps(result) + "\n").encode("utf-8"))
     except WebSocketDisconnect:
         return
+    finally:
+        try:
+            if ser.is_open:
+                ser.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
