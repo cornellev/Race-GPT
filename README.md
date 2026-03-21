@@ -6,19 +6,30 @@ Race-GPT is a FastAPI service that receives live telemetry from RED (Race Engine
 
 ```mermaid
 flowchart LR
-     RED[Race Engineer Dashboard RED] -->|JSON or CSV telemetry| WS[/ws/analyze]
-     RED -->|JSON or CSV telemetry| REST[/analyze]
+    RED["Race Engineer Dashboard RED"]
+    WS["/ws/analyze WebSocket"]
+    REST["/analyze POST"]
+    NORM["Normalize telemetry"]
+    SUMM["Build current summary"]
+    BASE["baseline_telemetry.json"]
+    PRE["Precheck rules"]
+    OK["No critical issues detected"]
+    LLM["Ollama model cev-efficiency-engineer"]
+    VERDICT["Single sentence verdict"]
 
-     WS --> NORM[Normalize telemetry]
+    RED -->|JSON or CSV telemetry| WS
+    RED -->|JSON or CSV telemetry| REST
+
+    WS --> NORM
      REST --> NORM
 
-     NORM --> SUMM[Build current summary]
-     BASE[baseline_telemetry.json] --> PRE[Precheck rules]
+    NORM --> SUMM
+    BASE --> PRE
      SUMM --> PRE
 
-     PRE -->|No issue| OK[No critical issues detected]
-     PRE -->|Issue found| LLM[Ollama model cev-efficiency-engineer]
-     LLM --> VERDICT[Single sentence verdict]
+    PRE -->|No issue| OK
+    PRE -->|Issue found| LLM
+    LLM --> VERDICT
 ```
 
 RED is expected to call the endpoint in main.py, typically the websocket endpoint /ws/analyze for periodic updates.
