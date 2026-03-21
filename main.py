@@ -134,21 +134,26 @@ def analyze(data: TelemetryIn):
     Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
     """.strip()
 
-    response = chat(
-        model="cev-efficiency-engineer",
-        messages=[
-            {"role": "user", "content": prompt},
-        ],
-        stream=False,
-        keep_alive=600,
-        options={
-            "temperature": 0.05,
-            "top_p": 0.7,
-            "repeat_penalty": 1.15,
-            "num_predict": 32,
-            "stop": ["\n"],
-        },
-    )
+    print(prompt, flush=True)
+
+    try:
+        response = chat(
+            model="cev-efficiency-engineer",
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+            keep_alive=600,
+            options={
+                "temperature": 0.05,
+                "top_p": 0.7,
+                "repeat_penalty": 1.15,
+                "num_predict": 32,
+                "stop": ["\n"],
+            },
+        )
+    except Exception:
+        return {"verdict": "Model unavailable: unable to analyze."}
 
     text = response["message"]["content"].strip()
 
