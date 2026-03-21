@@ -5,7 +5,7 @@ Race-GPT is a FastAPI service that receives live telemetry from RED (Race Engine
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
     RED["Race Engineer Dashboard RED"]
     WS["/ws/analyze WebSocket"]
     REST["/analyze POST"]
@@ -19,13 +19,11 @@ flowchart LR
 
     RED -->|JSON or CSV telemetry| WS
     RED -->|JSON or CSV telemetry| REST
-
     WS --> NORM
-     REST --> NORM
-
+    REST --> NORM
     NORM --> SUMM
+    SUMM --> PRE
     BASE --> PRE
-     SUMM --> PRE
 
     PRE -->|No issue| OK
     PRE -->|Issue found| LLM
