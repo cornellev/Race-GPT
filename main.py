@@ -1,9 +1,10 @@
+import asyncio
 import json
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
 from ollama import chat
+from pydantic import BaseModel, Field
 
 from telemetry import (
     build_summary,
@@ -12,6 +13,7 @@ from telemetry import (
 )
 
 app = FastAPI()
+analysis_lock = asyncio.Lock()
 
 
 class TelemetryIn(BaseModel):
@@ -46,12 +48,14 @@ def precheck(baseline: dict, current_summary: dict, current_df):
     base_current_mean = b.get("current", {}).get("overall", {}).get("mean", 0.0)
     current_current_peak = c.get("current", {}).get("peak")
     if current_current_peak is None:
-        current_current_peak = c.get("current", {}).get("overall", {}).get("max", 0.0)
+        current_current_peak = c.get("current", {}).get("overall", {}).get(
+            "max", 0.0
+        )
     base_dyn = b.get("dynamics", {})
     base_slope = base_dyn.get("dv_di_slope", 0.0)
     load_delta_i = max(0.0, current_current_peak - base_current_mean)
     load_adjust = min(0.0, base_slope * load_delta_i)
-    load_adjust = max(load_adjust, -1.5)  # clamp to avoid overcompensation
+    load_adjust = max(load_adjust, -1.5)
     sag_floor = (base_v_p05 - 1.0) + load_adjust
     if current_v_min < sag_floor:
         return "Critical: voltage sag below baseline."
@@ -59,7 +63,9 @@ def precheck(baseline: dict, current_summary: dict, current_df):
     base_current_p95 = b.get("current", {}).get("overall", {}).get("p95", 0.0)
     current_current_max = c.get("current", {}).get("peak")
     if current_current_max is None:
-        current_current_max = c.get("current", {}).get("overall", {}).get("max", 0.0)
+        current_current_max = c.get("current", {}).get("overall", {}).get(
+            "max", 0.0
+        )
     if base_current_p95 > 0 and current_current_max > (base_current_p95 * 1.5):
         return "Warning: current spike above baseline."
 
@@ -85,7 +91,6 @@ def precheck(baseline: dict, current_summary: dict, current_df):
         curr_outlier_fraction = curr_dyn.get("outlier_fraction", 0.0)
         base_outlier_fraction = base_dyn.get("outlier_fraction", 0.0)
 
-        # Expand baseline slope band slightly so normal accel/decel cycles pass.
         slope_margin = max(0.05, 3.0 * base_mad)
         slope_low = base_p05 - slope_margin
         slope_high = base_p95 + slope_margin
@@ -107,10 +112,9 @@ def parse_incoming_payload(csv_payload: Optional[str], json_payload: Optional[An
     raise ValueError("Missing telemetry payload: provide `csv` or `json`.")
 
 
-@app.post("/analyze")
-def analyze(data: TelemetryIn):
+def analyze_payload(csv_payload: Optional[str], json_payload: Optional[Any]):
     try:
-        current_df = parse_incoming_payload(data.csv, data.json_payload)
+        current_df = parse_incoming_payload(csv_payload, json_payload)
     except Exception:
         return {"verdict": "Telemetry invalid: unable to parse payload."}
 
@@ -156,8 +160,6 @@ def analyze(data: TelemetryIn):
         return {"verdict": "Model unavailable: unable to analyze."}
 
     text = response["message"]["content"].strip()
-
-    # Absolute safety clamp (should almost never trigger)
     if "." in text:
         text = text.split(".")[0].strip() + "."
     else:
@@ -166,81 +168,35 @@ def analyze(data: TelemetryIn):
     return {"verdict": text}
 
 
+async def run_analysis(csv_payload: Optional[str], json_payload: Optional[Any]):
+    if analysis_lock.locked():
+        return {"verdict": "LLM reasoning already in progress. Try again shortly."}
+
+    async with analysis_lock:
+        return await asyncio.to_thread(analyze_payload, csv_payload, json_payload)
+
+
+@app.post("/analyze")
+async def analyze(data: TelemetryIn):
+    return await run_analysis(data.csv, data.json_payload)
+
+
 @app.websocket("/ws/analyze")
 async def analyze_ws(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
             payload = await websocket.receive_json()
-            try:
-                current_df = parse_incoming_payload(
-                    payload.get("csv"),
-                    payload.get("json"),
-                )
-            except Exception:
-                await websocket.send_json(
-                    {"verdict": "Telemetry invalid: unable to parse payload."}
-                )
-                continue
-
-            baseline = load_baseline()
-            current_summary = build_summary(current_df)
-            decision = precheck(baseline, current_summary, current_df)
-
-            if decision is None:
-                await websocket.send_json(
-                    {"verdict": "No critical issues detected."}
-                )
-                continue
-
-            prompt = f"""
-            PRECHECK_DECISION:
-            {decision}
-
-            BASELINE_TELEMETRY:
-            {json.dumps(baseline, separators=(",", ":"), ensure_ascii=False)}
-
-            CURRENT_SUMMARY:
-            {json.dumps(current_summary, separators=(",", ":"), ensure_ascii=False)}
-
-            Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
-            """.strip()
-
-            print(prompt, flush=True)
-
-            try:
-                response = chat(
-                    model="cev-efficiency-engineer",
-                    messages=[
-                        {"role": "user", "content": prompt},
-                    ],
-                    stream=False,
-                    keep_alive=10000,
-                    options={
-                        "temperature": 0.05,
-                        "top_p": 0.7,
-                        "repeat_penalty": 1.15,
-                        "num_predict": 32,
-                        "stop": ["\n"],
-                    },
-                )
-            except Exception:
-                await websocket.send_json(
-                    {"verdict": "Model unavailable: unable to analyze."}
-                )
-                continue
-
-            text = response["message"]["content"].strip()
-            if "." in text:
-                text = text.split(".")[0].strip() + "."
-            else:
-                text = text.strip() + "."
-
-            await websocket.send_json({"verdict": text})
+            result = await run_analysis(
+                payload.get("csv"),
+                payload.get("json"),
+            )
+            await websocket.send_json(result)
     except WebSocketDisconnect:
         return
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
