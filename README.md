@@ -7,8 +7,9 @@ Race-GPT is a FastAPI service that receives live telemetry from RED (Race Engine
 ```mermaid
 flowchart TD
     RED["Race Engineer Dashboard RED"]
-    WS["/ws/analyze WebSocket"]
-    REST["/analyze POST"]
+    INGEST["Telemetry input\nJSON or CSV"]
+    WS["/ws/analyze\nWebSocket endpoint"]
+    REST["/analyze\nPOST endpoint"]
     NORM["Normalize telemetry"]
     SUMM["Build current summary"]
     BASE["baseline_telemetry.json"]
@@ -17,8 +18,9 @@ flowchart TD
     LLM["Ollama model cev-efficiency-engineer"]
     VERDICT["Single sentence verdict"]
 
-    RED -->|JSON or CSV telemetry| WS
-    RED -->|JSON or CSV telemetry| REST
+    RED --> INGEST
+    INGEST --> WS
+    INGEST --> REST
     WS --> NORM
     REST --> NORM
     NORM --> SUMM
