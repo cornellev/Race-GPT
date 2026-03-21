@@ -7,29 +7,28 @@ Race-GPT is a FastAPI service that receives live telemetry from RED (Race Engine
 ```mermaid
 flowchart TD
     RED["Race Engineer Dashboard RED"]
-    INGEST["Telemetry input\nJSON or CSV"]
-    WS["/ws/analyze\nWebSocket endpoint"]
-    REST["/analyze\nPOST endpoint"]
-    NORM["Normalize telemetry"]
-    SUMM["Build current summary"]
+    API["Race-GPT API\n/ws/analyze or /analyze"]
+    PRE["Normalize + summarize + precheck"]
     BASE["baseline_telemetry.json"]
-    PRE["Precheck rules"]
-    OK["No critical issues detected"]
-    LLM["Ollama model cev-efficiency-engineer"]
+    LLM["Ollama model\ncev-efficiency-engineer"]
     VERDICT["Single sentence verdict"]
 
-    RED --> INGEST
-    INGEST --> WS
-    INGEST --> REST
-    WS --> NORM
-    REST --> NORM
-    NORM --> SUMM
-    SUMM --> PRE
+    RED -->|JSON or CSV telemetry| API
+    API --> PRE
     BASE --> PRE
-
-    PRE -->|No issue| OK
+    PRE -->|No issue| VERDICT
     PRE -->|Issue found| LLM
     LLM --> VERDICT
+
+    classDef source fill:#0f172a,stroke:#334155,color:#e2e8f0
+    classDef process fill:#1e293b,stroke:#475569,color:#f8fafc
+    classDef model fill:#1f2937,stroke:#6b7280,color:#f9fafb
+    classDef output fill:#14532d,stroke:#22c55e,color:#ecfdf5
+
+    class RED,BASE source
+    class API,PRE process
+    class LLM model
+    class VERDICT output
 ```
 
 RED is expected to call the endpoint in main.py, typically the websocket endpoint /ws/analyze for periodic updates.
