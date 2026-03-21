@@ -1,84 +1,84 @@
 {
   "meta": {
-    "total_rows": 30,
-    "seq_start": 1.0,
-    "seq_end": 30.0,
-    "time_start_sec": 1.0,
-    "time_end_sec": 30.0
+    "total_rows": 502,
+    "seq_start": 217738.0,
+    "seq_end": 218066.0,
+    "time_start_sec": 0.0,
+    "time_end_sec": 0.0
   },
   "voltage": {
     "overall": {
-      "mean": 40.771,
-      "std": 0.042616979,
-      "var": 0.0018162069,
-      "min": 40.69,
-      "max": 40.85,
-      "median": 40.77,
-      "p05": 40.7045,
-      "p95": 40.8355,
-      "cv": 0.0010452768
+      "mean": 0.0,
+      "std": 0.0,
+      "var": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "median": 0.0,
+      "p05": 0.0,
+      "p95": 0.0,
+      "cv": 0.0
     },
-    "min_sag": 40.69
+    "min_sag": 0.0
   },
   "current": {
     "overall": {
-      "mean": 0.275,
-      "std": 0.0225526205,
-      "var": 0.0005086207,
-      "min": 0.23,
-      "max": 0.32,
-      "median": 0.275,
-      "p05": 0.24,
-      "p95": 0.31,
-      "cv": 0.0820095289
+      "mean": 0.0,
+      "std": 0.0,
+      "var": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "median": 0.0,
+      "p05": 0.0,
+      "p95": 0.0,
+      "cv": 0.0
     },
-    "idle_fraction": 0.0,
-    "peak": 0.32
+    "idle_fraction": 1.0,
+    "peak": 0.0
   },
   "power": {
     "overall": {
-      "mean": 11.2111933333,
-      "std": 0.9090087837,
-      "var": 0.8262969689,
-      "min": 9.3955,
-      "max": 13.0208,
-      "median": 11.21155,
-      "p05": 9.79896,
-      "p95": 12.62041,
-      "cv": 0.0810804663
+      "mean": 0.0,
+      "std": 0.0,
+      "var": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "median": 0.0,
+      "p05": 0.0,
+      "p95": 0.0,
+      "cv": 0.0
     },
-    "peak": 13.0208,
+    "peak": 0.0,
     "negative_fraction": 0.0
   },
   "efficiency_signals": {
-    "power_per_amp_mean": 40.7679757576,
-    "power_std": 0.9090087837
+    "power_per_amp_mean": 0.0,
+    "power_std": 0.0
   },
   "dynamics": {
-    "delta_count": 29,
-    "dv_di_slope": -3.25,
-    "dv_di_intercept": 0.0025,
+    "delta_count": 0,
+    "dv_di_slope": 0.0,
+    "dv_di_intercept": 0.0,
     "residual_mad": 0.0,
-    "outlier_fraction": 0.2068965517,
-    "inst_slope_p05": -3.3333333333,
-    "inst_slope_p95": -2.0
+    "outlier_fraction": 0.0,
+    "inst_slope_p05": 0.0,
+    "inst_slope_p95": 0.0
   },
   "correlations": {
-    "voltage_vs_current": -0.8951439497,
-    "current_vs_power": 0.9999825526
+    "voltage_vs_current": 0.0,
+    "current_vs_power": 0.0
   },
   "covariance": {
     "voltage": {
-      "current": -0.0008603448,
-      "power": -0.0345765448
+      "current": 0.0,
+      "power": 0.0
     },
     "current": {
-      "voltage": -0.0008603448,
-      "power": 0.0205001724
+      "voltage": 0.0,
+      "power": 0.0
     },
     "power": {
-      "voltage": -0.0345765448,
-      "current": 0.0205001724
+      "voltage": 0.0,
+      "current": 0.0
     }
   }
 }

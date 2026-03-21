@@ -215,7 +215,7 @@ async def analyze_ws(websocket: WebSocket):
                         {"role": "user", "content": prompt},
                     ],
                     stream=False,
-                    keep_alive=600,
+                    keep_alive=10000,
                     options={
                         "temperature": 0.05,
                         "top_p": 0.7,

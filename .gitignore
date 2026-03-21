@@ -3,3 +3,7 @@ env/
 venv
 venv/
 __pycache__/
+bags/
+converted_bags/
+converted_bags_test/
+local.md
