@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import traceback
+import multiprocessing as mp
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -157,6 +158,7 @@ def analyze_payload(csv_payload: Optional[str], json_payload: Optional[Any]):
                 },
             )
         except Exception:
+            traceback.print_exc()
             return {"verdict": "Model unavailable: unable to analyze."}
 
         text = response.get("message", {}).get("content", "")
@@ -181,15 +183,43 @@ async def run_analysis(csv_payload: Optional[str], json_payload: Optional[Any]):
 
     try:
         async with analysis_lock:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(analyze_payload, csv_payload, json_payload),
-                    timeout=ANALYSIS_TIMEOUT_SEC,
-                )
-            except asyncio.TimeoutError:
-                return {"verdict": "Model timed out: unable to analyze."}
+            return await asyncio.to_thread(run_analysis_sync, csv_payload, json_payload)
     except Exception:
         traceback.print_exc()
+        return {"verdict": "Internal analysis error: unable to analyze."}
+
+
+
+
+def _analysis_process_entry(result_queue: mp.Queue, csv_payload: Optional[str], json_payload: Optional[Any]):
+    try:
+        result_queue.put(analyze_payload(csv_payload, json_payload))
+    except Exception:
+        traceback.print_exc()
+        result_queue.put({"verdict": "Internal analysis error: unable to analyze."})
+
+
+def run_analysis_sync(csv_payload: Optional[str], json_payload: Optional[Any]):
+    result_queue: mp.Queue = mp.Queue(maxsize=1)
+    process = mp.Process(
+        target=_analysis_process_entry,
+        args=(result_queue, csv_payload, json_payload),
+        daemon=True,
+    )
+    process.start()
+    process.join(ANALYSIS_TIMEOUT_SEC)
+
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=1.0)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1.0)
+        return {"verdict": "Model timed out: unable to analyze."}
+
+    try:
+        return result_queue.get_nowait()
+    except Exception:
         return {"verdict": "Internal analysis error: unable to analyze."}
 
 
