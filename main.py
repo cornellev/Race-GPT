@@ -144,20 +144,20 @@ def analyze_payload(csv_payload: Optional[str], json_payload: Optional[Any]):
 
         print(prompt, flush=True)
 
-    try:
-        response = chat(
-            model="cev-efficiency-engineer",
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
-            stream=False,
-            keep_alive=10000,
-            options={
-                "stop": ["\n"],
-            },
-        )
-    except Exception:
-        return {"verdict": "Model unavailable: unable to analyze."}
+        try:
+            response = chat(
+                model="cev-efficiency-engineer",
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+                stream=False,
+                keep_alive=10000,
+                options={
+                    "stop": ["\n"],
+                },
+            )
+        except Exception:
+            return {"verdict": "Model unavailable: unable to analyze."}
 
         text = response.get("message", {}).get("content", "")
         if not isinstance(text, str) or not text.strip():
