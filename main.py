@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import traceback
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -14,6 +16,7 @@ from telemetry import (
 
 app = FastAPI()
 analysis_lock = asyncio.Lock()
+ANALYSIS_TIMEOUT_SEC = float(os.getenv("ANALYSIS_TIMEOUT_SEC", "15"))
 
 
 class TelemetryIn(BaseModel):
@@ -114,71 +117,90 @@ def parse_incoming_payload(csv_payload: Optional[str], json_payload: Optional[An
 
 def analyze_payload(csv_payload: Optional[str], json_payload: Optional[Any]):
     try:
-        current_df = parse_incoming_payload(csv_payload, json_payload)
+        try:
+            current_df = parse_incoming_payload(csv_payload, json_payload)
+        except Exception:
+            return {"verdict": "Telemetry invalid: unable to parse payload."}
+
+        baseline = load_baseline()
+        current_summary = build_summary(current_df)
+        decision = precheck(baseline, current_summary, current_df)
+
+        if decision is None:
+            return {"verdict": "No critical issues detected."}
+
+        prompt = f"""
+        PRECHECK_DECISION:
+        {decision}
+
+        BASELINE_TELEMETRY:
+        {json.dumps(baseline, separators=(",", ":"), ensure_ascii=False)}
+
+        CURRENT_SUMMARY:
+        {json.dumps(current_summary, separators=(",", ":"), ensure_ascii=False)}
+
+        Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
+        """.strip()
+
+        print(prompt, flush=True)
+
+        try:
+            response = chat(
+                model="cev-efficiency-engineer",
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+                stream=False,
+                keep_alive=10000,
+                options={
+                    "stop": ["\n"],
+                },
+            )
+        except Exception:
+            traceback.print_exc()
+            return {"verdict": "Model unavailable: unable to analyze."}
+
+        text = response.get("message", {}).get("content", "")
+        if not isinstance(text, str) or not text.strip():
+            return {"verdict": decision}
+
+        text = text.strip()
+        if "." in text:
+            text = text.split(".")[0].strip() + "."
+        else:
+            text = text.strip() + "."
+
+        return {"verdict": text}
     except Exception:
-        return {"verdict": "Telemetry invalid: unable to parse payload."}
-
-    baseline = load_baseline()
-    current_summary = build_summary(current_df)
-    decision = precheck(baseline, current_summary, current_df)
-
-    if decision is None:
-        return {"verdict": "No critical issues detected."}
-
-    prompt = f"""
-    PRECHECK_DECISION:
-    {decision}
-
-    BASELINE_TELEMETRY:
-    {json.dumps(baseline, separators=(",", ":"), ensure_ascii=False)}
-
-    CURRENT_SUMMARY:
-    {json.dumps(current_summary, separators=(",", ":"), ensure_ascii=False)}
-
-    Return exactly one sentence describing the issue. Do not add extra details beyond the decision.
-    """.strip()
-
-    print(prompt, flush=True)
-
-    try:
-        response = chat(
-            model="cev-efficiency-engineer",
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
-            stream=False,
-            keep_alive=600,
-            options={
-                "temperature": 0.05,
-                "top_p": 0.7,
-                "repeat_penalty": 1.15,
-                "num_predict": 32,
-                "stop": ["\n"],
-            },
-        )
-    except Exception:
-        return {"verdict": "Model unavailable: unable to analyze."}
-
-    text = response["message"]["content"].strip()
-    if "." in text:
-        text = text.split(".")[0].strip() + "."
-    else:
-        text = text.strip() + "."
-
-    return {"verdict": text}
+        traceback.print_exc()
+        return {"verdict": "Internal analysis error: unable to analyze."}
 
 
 async def run_analysis(csv_payload: Optional[str], json_payload: Optional[Any]):
     if analysis_lock.locked():
         return {"verdict": "LLM reasoning already in progress. Try again shortly."}
 
-    async with analysis_lock:
-        return await asyncio.to_thread(analyze_payload, csv_payload, json_payload)
+    try:
+        async with analysis_lock:
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(analyze_payload, csv_payload, json_payload),
+                    timeout=ANALYSIS_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError:
+                return {"verdict": "Model timed out: unable to analyze."}
+    except Exception:
+        traceback.print_exc()
+        return {"verdict": "Internal analysis error: unable to analyze."}
 
 
 @app.post("/analyze")
 async def analyze(data: TelemetryIn):
-    return await run_analysis(data.csv, data.json_payload)
+    try:
+        return await run_analysis(data.csv, data.json_payload)
+    except Exception:
+        traceback.print_exc()
+        return {"verdict": "Internal analysis error: unable to analyze."}
 
 
 @app.websocket("/ws/analyze")
@@ -186,12 +208,18 @@ async def analyze_ws(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            payload = await websocket.receive_json()
-            result = await run_analysis(
-                payload.get("csv"),
-                payload.get("json"),
-            )
-            await websocket.send_json(result)
+            try:
+                payload = await websocket.receive_json()
+                result = await run_analysis(
+                    payload.get("csv"),
+                    payload.get("json"),
+                )
+                await websocket.send_json(result)
+            except WebSocketDisconnect:
+                return
+            except Exception:
+                traceback.print_exc()
+                await websocket.send_json({"verdict": "Internal analysis error: unable to analyze."})
     except WebSocketDisconnect:
         return
 
